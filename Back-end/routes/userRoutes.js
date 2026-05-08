@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authUser, registerUser, getUserProfile, updateUserProfile, getUsers, deleteUser, deleteUserProfile, authGoogleUser } = require('../controllers/userController');
 const { protect, admin } = require('../middleware/authMiddleware');
+const { sendContactEmail }  = require('../controllers/contactController')
 
 /**
  * @swagger
@@ -28,6 +29,33 @@ const { protect, admin } = require('../middleware/authMiddleware');
  *     responses:
  *       200:
  *         description: Success
+ *
+ * /api/users/contact:
+ *   post:
+ *     summary: Send contact email
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - message
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               message:
+ *                  type: string
+ *     responses:
+ *       200:
+ *         description: Email sent successfully
+ *       500:
+ *         description: Failed to send email
  *
  * /api/users/google:
  *   post:
@@ -74,6 +102,7 @@ const { protect, admin } = require('../middleware/authMiddleware');
  */
 router.route('/').post(registerUser).get(protect, admin, getUsers);
 router.post('/login', authUser);
+router.post('/contact', sendContactEmail);
 router.route('/profile').get(protect, getUserProfile).put(protect, updateUserProfile).delete(protect, deleteUserProfile);
 router.route('/:id').delete(protect, admin, deleteUser);
 router.post('/google', authGoogleUser);

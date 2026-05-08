@@ -132,4 +132,13 @@ const updateOrderToDeliver = asyncHandler(async (req, res) => {
     }
 });
 
-module.exports = { addOrderItems, getOrderById, getMyOrders, getOrderSummary, updateOrderToPaid, updateOrderToDeliver };
+const getAllOrders = asyncHandler (async (req, res) => {
+    try {
+        const orders = await Order.find({}).populate('user', 'id name email');
+        res.json(orders);
+    } catch (error) {
+        res.status(500).json({ message: "Server Error fetching orders" });
+    }
+});
+
+module.exports = { addOrderItems, getOrderById, getMyOrders, getOrderSummary, updateOrderToPaid, updateOrderToDeliver, getAllOrders };

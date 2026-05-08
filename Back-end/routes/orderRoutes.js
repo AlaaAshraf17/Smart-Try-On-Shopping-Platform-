@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { addOrderItems, getOrderById, getMyOrders, getOrderSummary, updateOrderToDeliver, updateOrderToPaid } = require('../controllers/orderController');
+const { addOrderItems, getOrderById, getMyOrders, getOrderSummary, updateOrderToDeliver, updateOrderToPaid,
+    getAllOrders
+} = require('../controllers/orderController');
 const { protect, admin } = require('../middleware/authMiddleware');
 
 /**
@@ -81,10 +83,20 @@ const { protect, admin } = require('../middleware/authMiddleware');
  *     responses:
  *       200:
  *         description: Delivered
+ * /api/orders/all:
+ *   get:
+ *     summary: Get all orders (Admin)
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     response:
+ *       200:
+ *         description: Success
  */
 router.route('/').post(protect, addOrderItems);
 router.route('/summary').get(protect, admin, getOrderSummary);
 router.route('/myorders').get(protect, getMyOrders);
+router.route('/all').get(protect, admin, getAllOrders);
 router.route('/:id').get(protect, getOrderById);
 router.route('/:id/pay').put(protect, updateOrderToPaid);
 router.route('/:id/deliver').put(protect, admin, updateOrderToDeliver);
