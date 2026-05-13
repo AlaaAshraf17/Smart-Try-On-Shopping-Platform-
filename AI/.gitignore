@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.DS_Store
+
+# MediaPipe model files — large binaries, download via download_models.py
+*.task
