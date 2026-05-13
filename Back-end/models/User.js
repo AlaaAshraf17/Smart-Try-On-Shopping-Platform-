@@ -17,8 +17,8 @@ const userSchema = mongoose.Schema({
         enum: ['Male', 'Female'],
         default: 'Male'
     },
-    height: { type: Number }, // in cm
-    weight: { type: Number }, // in kg
+    height: { type: Number, default: 0 }, // in cm
+    weight: { type: Number, default: 0 }, // in kg
 
     phoneNumber: { type: String },
     address: {

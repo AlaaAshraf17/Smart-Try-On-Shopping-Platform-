@@ -19,6 +19,9 @@ const swaggerSpec = require('./swagger');
 const morgan = require('morgan');
 const os = require('os-utils');
 
+process.on("unhandledRejection", (err) => {
+    console.error("Unhandled Rejection:", err.message);
+});
 console.log('🔍 Debug: Starting server initialization');
 console.log('Current directory:', process.cwd());
 console.log('__dirname:', __dirname);
