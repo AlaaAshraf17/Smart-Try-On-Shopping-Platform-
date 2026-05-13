@@ -2,15 +2,29 @@
 
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useWishlist } from '@/contexts/WishlistContext'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { motion } from 'framer-motion'
 import { API } from '@/lib/axios'
+import WishlistHeart from '@/components/ui/WishlistHeart'
 
 const tabs = ['Account', 'Measurements', 'Orders', 'Wishlist']
 
 const PAYMENT_LABELS = { cash: 'Cash on Delivery', card: 'Card', paypal: 'PayPal' }
+
+function StarRating({ rating }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <svg key={star} className={`w-3.5 h-3.5 ${star <= Math.round(rating) ? 'text-amber-400' : 'text-slate-300 dark:text-slate-600'}`} fill="currentColor" viewBox="0 0 20 20">
+          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+        </svg>
+      ))}
+    </div>
+  )
+}
 
 function OrdersTab() {
   const [orders, setOrders] = useState([])
@@ -93,7 +107,7 @@ function OrdersTab() {
           <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {order.orderItems.map((item, i) => (
               <div key={i} className="flex items-center gap-4 px-5 py-4">
-                <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-700 flex-shrink-0">
+                <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-slate-200 dark:bg-slate-700 shrink-0">
                   {item.image ? (
                     <Image src={item.image} alt={item.name} fill className="object-cover" sizes="56px" />
                   ) : (
@@ -110,7 +124,7 @@ function OrdersTab() {
                     {item.qty} × {item.price} EGP
                   </p>
                 </div>
-                <span className="text-sm font-semibold text-slate-900 dark:text-white flex-shrink-0">
+                <span className="text-sm font-semibold text-slate-900 dark:text-white shrink-0">
                   {(item.qty * item.price).toFixed(2)} EGP
                 </span>
               </div>
@@ -140,6 +154,7 @@ function OrdersTab() {
 
 const ProfilePage = () => {
   const { user, logout } = useAuth()
+  const { wishlistItems, loading: wishlistLoading } = useWishlist()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('Account')
   const [measurements, setMeasurements] = useState({
@@ -177,7 +192,7 @@ const ProfilePage = () => {
           transition={{ duration: 0.5 }}
           className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-8 flex flex-col sm:flex-row items-center sm:items-start gap-6"
         >
-          <div className="flex-shrink-0 w-24 h-24 rounded-full bg-slate-900 dark:bg-white flex items-center justify-center text-white dark:text-slate-900 text-4xl font-bold">
+          <div className="shrink-0 w-24 h-24 rounded-full bg-slate-900 dark:bg-white flex items-center justify-center text-white dark:text-slate-900 text-4xl font-bold">
             {user.name?.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 text-center sm:text-left">
@@ -306,21 +321,95 @@ const ProfilePage = () => {
           {/* Wishlist Tab */}
           {activeTab === 'Wishlist' && (
             <div className="space-y-6">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Wishlist</h2>
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                  <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                  </svg>
-                </div>
-                <p className="text-slate-500 dark:text-slate-400 text-base mb-4">Your wishlist is empty</p>
-                <Link
-                  href="/product"
-                  className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-base font-medium rounded-full hover:bg-slate-700 dark:hover:bg-slate-100 transition-colors duration-200"
-                >
-                  Discover Products
-                </Link>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Wishlist</h2>
+                <span className="text-sm text-slate-500 dark:text-slate-400">
+                  {wishlistItems.length} item{wishlistItems.length !== 1 ? 's' : ''}
+                </span>
               </div>
+
+              {wishlistLoading ? (
+                <div className="space-y-4">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="animate-pulse flex gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl">
+                      <div className="w-16 h-16 bg-slate-200 dark:bg-slate-700 rounded-lg shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded w-3/4" />
+                        <div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-1/2" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : wishlistItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                    <svg className="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                  </div>
+                  <p className="text-slate-500 dark:text-slate-400 text-base mb-4">Your wishlist is empty</p>
+                  <Link
+                    href="/product"
+                    className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-base font-medium rounded-full hover:bg-slate-700 dark:hover:bg-slate-100 transition-colors duration-200"
+                  >
+                    Discover Products
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid gap-4">
+                  {wishlistItems.map((product, index) => (
+                    <motion.div
+                      key={product._id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex gap-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors duration-200"
+                    >
+                      {/* Product Image */}
+                      <div className="relative w-16 h-16 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-700 shrink-0">
+                        <Image
+                          src={product.image}
+                          alt={product.name}
+                          fill
+                          className="object-cover"
+                          sizes="64px"
+                        />
+                      </div>
+
+                      {/* Product Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <Link
+                              href={`/product/${product._id}`}
+                              className="text-base font-medium text-slate-900 dark:text-white hover:text-slate-600 dark:hover:text-slate-300 transition-colors line-clamp-1"
+                            >
+                              {product.name}
+                            </Link>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                              {product.brand}
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <StarRating rating={product.rating || 0} />
+                              <span className="text-xs text-slate-400 dark:text-slate-500">
+                                ({product.numReviews || 0})
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-base font-semibold text-slate-900 dark:text-white">
+                              {product.price} EGP
+                            </span>
+                            <div className="flex items-center justify-center">
+                              <WishlistHeart productId={product._id} size="sm" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
