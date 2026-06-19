@@ -52,7 +52,7 @@ function ProductCardImage({ product }) {
 }
 
 export default function Products() {
-  const [products, setProducts] = useState([]);
+  const [allProducts, setAllProducts] = useState([]); // full unfiltered list across all pages
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -60,33 +60,55 @@ export default function Products() {
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
 
+  // Fetch ALL products once on mount so category filtering always has the full dataset.
+  // The API paginates to 8 per page, so we loop through all pages.
   useEffect(() => {
-    const loadProducts = async () => {
+    const loadAllProducts = async () => {
       setLoading(true);
       try {
-        const { data } = await API.get(`/api/products?pageNumber=${page}&pageSize=8`);
-        console.log('API response:', data);
-        const list = data.products || [];
-        setProducts(list);
-        setPages(data.pages || 1);
-        setSelectedIdx(0);
-        if (list[0]?.glbModel) useGLTF.preload(list[0].glbModel);
+        // First request to find out total pages
+        const { data: first } = await API.get('/api/products?pageNumber=1&pageSize=8');
+        const totalPages = first.pages || 1;
+        let all = [...(first.products || [])];
+
+        // Fetch remaining pages in parallel
+        if (totalPages > 1) {
+          const requests = [];
+          for (let p = 2; p <= totalPages; p++) {
+            requests.push(API.get(`/api/products?pageNumber=${p}&pageSize=8`));
+          }
+          const results = await Promise.all(requests);
+          results.forEach(({ data }) => {
+            all = all.concat(data.products || []);
+          });
+        }
+
+        setAllProducts(all);
+        if (all[0]?.glbModel) useGLTF.preload(all[0].glbModel);
       } catch (e) {
         console.error('Failed to fetch products:', e);
-        setProducts([]);
+        setAllProducts([]);
         setError(e.message || 'Failed to load products');
       } finally {
         setLoading(false);
       }
     };
-    loadProducts();
-  }, [page]);
+    loadAllProducts();
+  }, []);
 
+  const PAGE_SIZE = 8;
+
+  // Filter all products by active category
   const filtered = activeCategory === 'All'
-    ? products
-    : products.filter(p => p.category === activeCategory);
+    ? allProducts
+    : allProducts.filter(p => p.category === activeCategory);
 
-  const selected = filtered[selectedIdx] || products[0];
+  // Client-side pagination of the filtered list
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage   = Math.min(page, totalPages);
+  const products   = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const selected = products[selectedIdx] || products[0] || allProducts[0];
 
   const handleSelect = (index) => {
     setSelectedIdx(index);
@@ -106,7 +128,7 @@ export default function Products() {
     );
   }
 
-  if (!products.length) {
+  if (!allProducts.length) {
     return (
       <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col items-center justify-center gap-3">
         <p className="text-slate-400 dark:text-slate-500">No products found.</p>
@@ -225,7 +247,7 @@ export default function Products() {
               {CATEGORIES.map((cat) => (
                 <button
                   key={cat}
-                  onClick={() => { setActiveCategory(cat); setSelectedIdx(0); }}
+                  onClick={() => { setActiveCategory(cat); setSelectedIdx(0); setPage(1); }}
                   className={`px-4 py-1.5 text-xs font-medium tracking-wider rounded-full border transition-all duration-200 ${
                     activeCategory === cat
                       ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
@@ -297,27 +319,27 @@ export default function Products() {
           </div>
 
           {/* Pagination */}
-          {pages > 1 && (
+          {totalPages > 1 && (
             <div className="flex items-center justify-center gap-2 mt-16">
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
+                disabled={safePage === 1}
                 className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-xl disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >← Prev</button>
-              {Array.from({ length: pages }, (_, i) => i + 1).map(p => (
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}
                   className={`w-9 h-9 text-sm rounded-xl border transition-colors ${
-                    p === page
+                    p === safePage
                       ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white'
                       : 'border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                   }`}
                 >{p}</button>
               ))}
               <button
-                onClick={() => setPage(p => Math.min(pages, p + 1))}
-                disabled={page === pages}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={safePage === totalPages}
                 className="px-4 py-2 text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-xl disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >Next →</button>
             </div>

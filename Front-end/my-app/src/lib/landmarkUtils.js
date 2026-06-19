@@ -82,17 +82,17 @@ export function pixelDistanceToWorld(a, b, frameWidth, canvasWidth, canvasHeight
  * on the face in Three.js world space.
  *
  * Returns:
- *   position  { x, y }   — world-space anchor point (between eyes and nose bridge)
+ *   position  { x, y }   — world-space anchor point (eye midpoint)
  *   scale     number      — world-space width from hinge to hinge
  *   rotationZ number      — Z rotation in radians (head tilt)
  *   rotationY number      — Y rotation in radians (head turn, from Z depth)
  *
  * Anchor point:
- *   Real glasses rest on the nose bridge, with lenses covering the eyes.
- *   The correct anchor is NOT the eye midpoint (too high) and NOT the nose
- *   bridge alone (too low). We blend: 50% eye midpoint + 50% nose bridge.
- *   This puts the anchor right where the nose pads sit — the natural resting
- *   point of glasses on a face.
+ *   The eye midpoint is used as the anchor. This places the glasses center
+ *   (nose bridge of the frame) directly between the two eyes, which is the
+ *   correct vertical position for glasses on a face.
+ *   Blending in nose_bridge (landmark 168, middle of nose) was pulling the
+ *   anchor too far down, causing the glasses to sit on the nose.
  *
  * Scale:
  *   We use arm_hinge to arm_hinge (landmarks 162→389) as the frame width.
@@ -118,21 +118,18 @@ export function computeGlassesTransform(
   const rfe = landmarks.right_face_edge;
   const le  = landmarks.left_eye;
   const re  = landmarks.right_eye;
-  const nb  = landmarks.nose_bridge;
   const lah = landmarks.left_arm_hinge;
   const rah = landmarks.right_arm_hinge;
 
-  // ── Anchor: blend of eye midpoint and nose bridge ─────────────────────────
-  // 50/50 blend puts the anchor at the nose pad position — where glasses rest.
-  // Increase nose_bridge weight (e.g. 0.4 eye + 0.6 nose) to move glasses down.
-  // Decrease it (e.g. 0.6 eye + 0.4 nose) to move glasses up.
-  const EYE_WEIGHT    = 0.5;
-  const BRIDGE_WEIGHT = 0.5;
-
+  // ── Anchor: eye midpoint only ─────────────────────────────────────────────
+  // The glasses center (bridge of the frame) sits between the two eyes.
+  // Using the eye midpoint directly places the frame correctly over the eyes.
+  // nose_bridge (landmark 168) is the MIDDLE of the nose — blending it in
+  // pulls the anchor too far down, which is why glasses appeared on the nose.
   const anchor = {
-    x: le.x * (EYE_WEIGHT / 2) + re.x * (EYE_WEIGHT / 2) + nb.x * BRIDGE_WEIGHT,
-    y: le.y * (EYE_WEIGHT / 2) + re.y * (EYE_WEIGHT / 2) + nb.y * BRIDGE_WEIGHT,
-    z: le.z * (EYE_WEIGHT / 2) + re.z * (EYE_WEIGHT / 2) + nb.z * BRIDGE_WEIGHT,
+    x: (le.x + re.x) / 2,
+    y: (le.y + re.y) / 2,
+    z: (le.z + re.z) / 2,
   };
 
   const position = landmarkToWorld(anchor, frameWidth, frameHeight, canvasWidth, canvasHeight);
@@ -151,34 +148,11 @@ export function computeGlassesTransform(
   const zDiff     = lfe.z - rfe.z;
   const rotationY = zDiff * 6.0;
 
-  return { position, scale, rotationZ, rotationY };
-}
+  // ── Arm landmarks in world space ──────────────────────────────────────────
+  const leftHinge  = landmarkToWorld(lah,                    frameWidth, frameHeight, canvasWidth, canvasHeight);
+  const rightHinge = landmarkToWorld(rah,                    frameWidth, frameHeight, canvasWidth, canvasHeight);
+  const leftEar    = landmarkToWorld(landmarks.left_ear_tip,  frameWidth, frameHeight, canvasWidth, canvasHeight);
+  const rightEar   = landmarkToWorld(landmarks.right_ear_tip, frameWidth, frameHeight, canvasWidth, canvasHeight);
 
-/**
- * computeShirtTransform — unchanged, shirts don't need Z depth.
- */
-export function computeShirtTransform(
-  measurements,
-  frameWidth,
-  frameHeight,
-  canvasWidth,
-  canvasHeight,
-) {
-  const worldWidth  = computeWorldWidth(canvasWidth, canvasHeight);
-  const worldHeight = worldWidth * (canvasHeight / canvasWidth);
-
-  const nb = measurements.shoulder_mid;
-  const nx =  nb[0] / frameWidth  - 0.5;
-  const ny =  nb[1] / frameHeight - 0.5;
-
-  const position = {
-    x:  nx * worldWidth,
-    y: -ny * worldHeight,
-  };
-
-  const scaleX   = (measurements.shoulder_width / frameWidth)  * worldWidth;
-  const scaleY   = (measurements.torso_height   / frameHeight) * worldHeight;
-  const rotation = -(measurements.torso_angle_deg * Math.PI) / 180;
-
-  return { position, scaleX, scaleY, rotation };
+  return { position, scale, rotationZ, rotationY, leftHinge, leftEar, rightHinge, rightEar };
 }

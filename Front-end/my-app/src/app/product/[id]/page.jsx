@@ -269,7 +269,7 @@ const handleTryOn = async () => {
                   </button>
 
                   {/* Live camera try-on — navigates to /try-on/[id] room */}
-                  {product.glbModel && ['Clothes', 'Accessories'].includes(product.category) && (
+                  {product.glbModel && product.category === 'Accessories' && (
                     <button
                       onClick={() => router.push(`/try-on/${product._id}`)}
                       className="flex items-center gap-2 px-4 py-3.5 bg-violet-600 text-white text-sm font-medium rounded-xl hover:opacity-90 active:scale-[0.98] transition-all"

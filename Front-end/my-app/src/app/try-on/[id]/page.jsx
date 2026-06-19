@@ -75,9 +75,8 @@ export default function TryOnRoomPage() {
     );
   }
 
-  // ── Product has no 3D model ────────────────────────────────────────────────
-  // Only Clothes and Accessories (glasses) are supported by the AI tracker.
-  const supported = ['Clothes', 'Accessories'].includes(product.category);
+  // Only Accessories (glasses) are supported by the AI tracker.
+  const supported = product.category === 'Accessories';
 
   if (!product.glbModel || !supported) {
     return (
@@ -94,7 +93,7 @@ export default function TryOnRoomPage() {
           <p className="text-white/40 text-xs max-w-xs">
             {!product.glbModel
               ? 'This product does not have a 3D model yet.'
-              : `Live try-on is currently supported for Clothes and Accessories only.`}
+              : 'Live try-on is currently supported for Accessories (glasses) only.'}
           </p>
         </div>
         <button
@@ -111,7 +110,6 @@ export default function TryOnRoomPage() {
   return (
     <TryOnCamera
       glbModel={product.glbModel}
-      category={product.category}
       onClose={() => router.back()}
     />
   );
