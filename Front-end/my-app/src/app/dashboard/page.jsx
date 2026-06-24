@@ -9,6 +9,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import Image from 'next/image'
 import { API } from '@/lib/axios'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts'
 
 function StatCard({ label, value, icon, loading }) {
   return (
@@ -528,23 +532,8 @@ function OrdersTab() {
   const load = async () => {
     setLoading(true)
     try {
-      // Backend has no admin "all orders" endpoint, so we use the summary
-      // and fetch each user's orders via the existing routes.
-      // The only available endpoint that returns all orders is the summary aggregate.
-      // We'll use a workaround: fetch orders for all users via /api/orders/myorders
-      // isn't available for admin. Instead we'll call the order summary for stats
-      // and list orders from the overview data. Since the backend only exposes
-      // /api/orders/myorders for users, we store recent orders from the overview fetch.
-      // For a proper admin list we call /api/orders/summary for stats and
-      // rely on the fact that admins can GET /api/orders/:id for any order.
-      // The cleanest available approach: fetch all orders by querying the DB
-      // through the summary endpoint — but that only returns aggregates.
-      // 
-      // The backend DOES have getOrderById (any authenticated user can call it
-      // if they know the ID). There's no "list all orders" admin endpoint.
-      // We'll use /api/orders/myorders scoped to the admin user for now,
-      // and note this limitation clearly.
-      const { data } = await API.get('/api/orders/myorders')
+      // GET /api/orders/all — admin endpoint that returns every order across all users
+      const { data } = await API.get('/api/orders/all')
       setOrders(data)
     } catch { toast.error('Failed to load orders') }
     finally { setLoading(false) }
@@ -598,6 +587,7 @@ function OrdersTab() {
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-700">
                 <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Order ID</th>
+                <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Customer</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Date</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Payment</th>
                 <th className="text-left px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Total</th>
@@ -609,6 +599,7 @@ function OrdersTab() {
               {loading ? Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i} className="animate-pulse">
                   <td className="px-6 py-4"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-32" /></td>
+                  <td className="px-6 py-4"><div className="h-3 bg-slate-200 dark:bg-slate-700 rounded w-28" /></td>
                   <td className="px-6 py-4"><div className="h-3 bg-slate-100 dark:bg-slate-800 rounded w-20" /></td>
                   <td className="px-6 py-4"><div className="h-3 bg-slate-100 dark:bg-slate-800 rounded w-24" /></td>
                   <td className="px-6 py-4"><div className="h-3 bg-slate-100 dark:bg-slate-800 rounded w-16" /></td>
@@ -621,6 +612,10 @@ function OrdersTab() {
                     <Link href={`/order/${order._id}`} className="font-mono text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors">
                       {order._id.slice(-8).toUpperCase()}
                     </Link>
+                  </td>
+                  <td className="px-6 py-4">
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">{order.user?.name || '—'}</p>
+                    <p className="text-xs text-slate-400 dark:text-slate-500">{order.user?.email || ''}</p>
                   </td>
                   <td className="px-6 py-4 text-slate-500 dark:text-slate-400 text-xs">
                     {new Date(order.createdAt).toLocaleDateString()}
@@ -877,9 +872,191 @@ function SupportTab({ adminId, adminName, conversations, setConversations, conne
   )
 }
 
+// ─── ANALYTICS TAB ────────────────────────────────────────────────────────────
+
+const DONUT_COLORS = ['#10b981', '#f59e0b']   // emerald / amber
+const LINE_COLOR   = '#3b82f6'                 // blue-500
+
+function AnalyticsTab({ allOrders, ordersLoading, aiQueueLength, tryOnSessionCount, activityFeed }) {
+  // ── 1. Monthly revenue from paid orders ───────────────────────────────────
+  const revenueByMonth = (() => {
+    const map = {}
+    allOrders.filter(o => o.isPaid).forEach(o => {
+      const d   = new Date(o.createdAt)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const lbl = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+      if (!map[key]) map[key] = { month: lbl, revenue: 0 }
+      map[key].revenue += Number(o.totalPrice)
+    })
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => ({ ...v, revenue: parseFloat(v.revenue.toFixed(2)) }))
+  })()
+
+  // ── 4. Paid / Unpaid donut ─────────────────────────────────────────────────
+  const paidCount   = allOrders.filter(o => o.isPaid).length
+  const unpaidCount = allOrders.length - paidCount
+  const donutData   = [
+    { name: 'Paid',   value: paidCount   },
+    { name: 'Unpaid', value: unpaidCount },
+  ]
+
+  // ── Activity feed icon helper ──────────────────────────────────────────────
+  const activityIcon = (type) => {
+    if (type === 'order')         return { icon: '🛍️', color: 'text-blue-500',   bg: 'bg-blue-50 dark:bg-blue-900/20' }
+    if (type === 'tryon_start')   return { icon: '🎨', color: 'text-violet-500', bg: 'bg-violet-50 dark:bg-violet-900/20' }
+    if (type === 'tryon_success') return { icon: '✅', color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }
+    if (type === 'tryon_error')   return { icon: '❌', color: 'text-red-500',    bg: 'bg-red-50 dark:bg-red-900/20' }
+    if (type === 'revenue')       return { icon: '💰', color: 'text-amber-500',  bg: 'bg-amber-50 dark:bg-amber-900/20' }
+    return { icon: '📋', color: 'text-slate-500', bg: 'bg-slate-100 dark:bg-slate-800' }
+  }
+
+  return (
+    <div className="space-y-8">
+
+      {/* ── Live counters row ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          {
+            label: 'AI Queue',
+            value: aiQueueLength,
+            sub:   aiQueueLength === 0 ? 'Idle' : 'Processing',
+            pulse: aiQueueLength > 0,
+            color: 'text-violet-600 dark:text-violet-400',
+          },
+          {
+            label: 'Try-Ons This Session',
+            value: tryOnSessionCount,
+            sub:   'Since you opened dashboard',
+            pulse: false,
+            color: 'text-blue-600 dark:text-blue-400',
+          },
+          {
+            label: 'Total Orders',
+            value: allOrders.length,
+            sub:   `${paidCount} paid`,
+            pulse: false,
+            color: 'text-slate-900 dark:text-white',
+          },
+          {
+            label: 'Total Revenue',
+            value: `${allOrders.filter(o => o.isPaid).reduce((s, o) => s + Number(o.totalPrice), 0).toFixed(0)} EGP`,
+            sub:   'From paid orders',
+            pulse: false,
+            color: 'text-emerald-600 dark:text-emerald-400',
+          },
+        ].map((card, i) => (
+          <motion.div
+            key={card.label}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.07 }}
+            className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-5"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              {card.pulse && <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />}
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">{card.label}</p>
+            </div>
+            <p className={`text-3xl font-bold ${card.color}`}>{ordersLoading ? '···' : card.value}</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{card.sub}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* ── Charts row ────────────────────────────────────────────────────── */}
+      <div className="grid lg:grid-cols-3 gap-6">
+
+        {/* 1. Monthly Revenue Line Chart */}
+        <div className="lg:col-span-2 bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+          <h3 className="font-semibold text-slate-900 dark:text-white mb-1">Monthly Revenue</h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mb-6">Paid orders only · EGP</p>
+          {ordersLoading ? (
+            <div className="h-48 animate-pulse bg-slate-100 dark:bg-slate-800 rounded-xl" />
+          ) : revenueByMonth.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No paid orders yet</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={revenueByMonth} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0/0.1)' }}
+                  formatter={(v) => [`${v} EGP`, 'Revenue']}
+                />
+                <Line type="monotone" dataKey="revenue" stroke={LINE_COLOR} strokeWidth={2.5} dot={{ r: 4, fill: LINE_COLOR }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* 4. Paid/Unpaid Donut */}
+        <div className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+          <h3 className="font-semibold text-slate-900 dark:text-white mb-1">Payment Status</h3>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mb-4">Paid vs Unpaid orders</p>
+          {ordersLoading ? (
+            <div className="h-48 animate-pulse bg-slate-100 dark:bg-slate-800 rounded-xl" />
+          ) : allOrders.length === 0 ? (
+            <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No orders yet</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={donutData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
+                  {donutData.map((_, i) => (
+                    <Cell key={i} fill={DONUT_COLORS[i]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v, n) => [v, n]} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Legend iconType="circle" iconSize={10} formatter={(v) => <span style={{ fontSize: 12, color: '#94a3b8' }}>{v}</span>} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* ── 7. Live Activity Feed ──────────────────────────────────────────── */}
+      <div className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700">
+          <div>
+            <h3 className="font-semibold text-slate-900 dark:text-white">Live Activity</h3>
+            <p className="text-xs text-slate-400 dark:text-slate-500">Real-time events from this session</p>
+          </div>
+          <span className="flex items-center gap-1.5 text-xs text-emerald-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+          </span>
+        </div>
+        <div className="divide-y divide-slate-50 dark:divide-slate-700/50 max-h-72 overflow-y-auto">
+          {activityFeed.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400 text-sm">
+              <span className="text-2xl mb-2">📡</span>
+              Waiting for activity...
+            </div>
+          ) : (
+            activityFeed.map((event) => {
+              const { icon, bg } = activityIcon(event.type)
+              return (
+                <div key={event.id} className="flex items-start gap-4 px-6 py-3.5">
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm flex-shrink-0 ${bg}`}>
+                    {icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-800 dark:text-slate-200">{event.message}</p>
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{event.time}</p>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 const SOCKET_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
-const TABS = ['Overview', 'Users', 'Products', 'Orders', 'Support']
+const TABS = ['Overview', 'Users', 'Products', 'Orders', 'Analytics', 'Support']
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -890,13 +1067,26 @@ export default function DashboardPage() {
   const [recentProducts, setRecentProducts] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // ── Support chat state — lives here so socket connects on dashboard mount,
-  //    not when the Support tab is first clicked. This ensures no messages are
-  //    missed due to late socket registration.
+  // ── Support chat state ─────────────────────────────────────────────────────
   const [conversations, setConversations] = useState({})
   const [supportConnected, setSupportConnected] = useState(false)
   const supportSocketRef = useRef(null)
   const supportJoinedRef = useRef(false)
+
+  // ── Analytics state ────────────────────────────────────────────────────────
+  const [allOrders, setAllOrders]                 = useState([])
+  const [ordersLoading, setOrdersLoading]         = useState(true)
+  const [aiQueueLength, setAiQueueLength]         = useState(0)
+  const [tryOnSessionCount, setTryOnSessionCount] = useState(0)
+  const [activityFeed, setActivityFeed]           = useState([])
+
+  const pushActivity = useCallback((type, message) => {
+    setActivityFeed(prev => [{
+      id:   Date.now() + Math.random(),
+      type, message,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    }, ...prev].slice(0, 20))
+  }, [])
 
   useEffect(() => {
     if (!user) { router.push('/login'); return }
@@ -917,8 +1107,16 @@ export default function DashboardPage() {
     }
     fetchOverview()
 
-    // Connect support socket immediately — join 'support' room right away
-    // so no user messages are missed while admin hasn't clicked the Support tab
+    // ── Fetch all orders for analytics charts ─────────────────────────────
+    const fetchAllOrders = async () => {
+      setOrdersLoading(true)
+      try { const { data } = await API.get('/api/orders/all'); setAllOrders(data) }
+      catch (e) { console.error(e) }
+      finally { setOrdersLoading(false) }
+    }
+    fetchAllOrders()
+
+    // ── Socket: support chat + analytics events ────────────────────────────
     const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] })
     supportSocketRef.current = socket
 
@@ -941,7 +1139,6 @@ export default function DashboardPage() {
           [senderId]: {
             senderName: senderName || existing.senderName,
             messages: [...existing.messages, { senderId, senderName, message, timestamp, fromMe: false }],
-            // always increment unread — SupportTab clears it when user opens the conversation
             unread: existing.unread + 1,
             lastTime: timestamp || new Date().toISOString(),
           },
@@ -949,12 +1146,48 @@ export default function DashboardPage() {
       })
     })
 
+    // ── Analytics socket events ────────────────────────────────────────────
+    socket.on('admin:queueUpdate', ({ queueLength }) => {
+      setAiQueueLength(queueLength ?? 0)
+    })
+
+    socket.on('admin:updateAnalytics', (data) => {
+      if (data.type === 'TRYON_STARTED') {
+        setAiQueueLength(data.queueLength ?? 0)
+        pushActivity('tryon_start', `Try-On started${data.user ? ` by ${data.user}` : ''}`)
+      }
+      if (data.type === 'TRYON_SUCCESS') {
+        setTryOnSessionCount(c => c + 1)
+        setAiQueueLength(data.queueLength ?? 0)
+        pushActivity('tryon_success', 'Try-On completed successfully')
+      }
+      if (data.type === 'TRYON_ERROR') {
+        setAiQueueLength(data.queueLength ?? 0)
+        pushActivity('tryon_error', 'Try-On failed — AI error')
+      }
+    })
+
+    socket.on('admin:newOrder', ({ totalPrice }) => {
+      pushActivity('order', `New order placed — ${Number(totalPrice ?? 0).toFixed(0)} EGP`)
+      // Refresh orders so the revenue chart updates
+      API.get('/api/orders/all').then(({ data }) => setAllOrders(data)).catch(() => {})
+    })
+
+    socket.on('admin:revenueUpdate', ({ amount }) => {
+      pushActivity('revenue', `Order marked paid — ${Number(amount ?? 0).toFixed(0)} EGP`)
+      API.get('/api/orders/all').then(({ data }) => setAllOrders(data)).catch(() => {})
+    })
+
+    socket.on('admin:errorAlert', ({ user: u, error }) => {
+      pushActivity('tryon_error', `Error for ${u || 'user'}: ${(error ?? '').slice(0, 60)}`)
+    })
+
     return () => {
       socket.disconnect()
       supportSocketRef.current = null
       supportJoinedRef.current = false
     }
-  }, [user, router])
+  }, [user, router, pushActivity])
 
   if (!user || !user.isAdmin) return null
 
@@ -1001,11 +1234,20 @@ export default function DashboardPage() {
         {/* Tab content */}
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-            {activeTab === 'Overview' && <OverviewTab summary={summary} recentUsers={recentUsers} recentProducts={recentProducts} loading={loading} />}
-            {activeTab === 'Users' && <UsersTab />}
-            {activeTab === 'Products' && <ProductsTab />}
-            {activeTab === 'Orders' && <OrdersTab />}
-            {activeTab === 'Support' && <SupportTab adminId={user._id} adminName={user.name} conversations={conversations} setConversations={setConversations} connected={supportConnected} socketRef={supportSocketRef} />}
+            {activeTab === 'Overview'   && <OverviewTab summary={summary} recentUsers={recentUsers} recentProducts={recentProducts} loading={loading} />}
+            {activeTab === 'Users'      && <UsersTab />}
+            {activeTab === 'Products'   && <ProductsTab />}
+            {activeTab === 'Orders'     && <OrdersTab />}
+            {activeTab === 'Analytics'  && (
+              <AnalyticsTab
+                allOrders={allOrders}
+                ordersLoading={ordersLoading}
+                aiQueueLength={aiQueueLength}
+                tryOnSessionCount={tryOnSessionCount}
+                activityFeed={activityFeed}
+              />
+            )}
+            {activeTab === 'Support'    && <SupportTab adminId={user._id} adminName={user.name} conversations={conversations} setConversations={setConversations} connected={supportConnected} socketRef={supportSocketRef} />}
           </motion.div>
         </AnimatePresence>
 

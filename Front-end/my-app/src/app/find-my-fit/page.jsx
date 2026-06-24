@@ -420,7 +420,27 @@ export default function FindMyFitPage() {
   }, []);
 
   const handleJoinRoom    = (id) => { socketRef.current?.emit("join_session", id); setRoomId(id); setShowRoomModal(false); addNotification(`Joined room ${id}`); };
-  const handleCreateRoom  = ()   => { const id = generateRoomId(); socketRef.current?.emit("join_session", id); setRoomId(id); setShowRoomModal(false); addNotification(`Room ${id} created!`); };
+  const handleCreateRoom  = async () => {
+    try {
+      const res  = await fetch(`${API_BASE_URL}/api/rooms/create`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      });
+      const data = await res.json();
+      const id   = data.roomId;
+      socketRef.current?.emit("join_session", id);
+      setRoomId(id);
+      setShowRoomModal(false);
+      addNotification(`Room ${id} created!`);
+    } catch {
+      // fallback to client-generated ID if backend unreachable
+      const id = `FIT-${Math.floor(1000 + Math.random() * 9000)}`;
+      socketRef.current?.emit("join_session", id);
+      setRoomId(id);
+      setShowRoomModal(false);
+      addNotification(`Room ${id} created!`);
+    }
+  };
   const handleLeaveRoom   = ()   => { socketRef.current?.emit("leave_session", roomId); setRoomId(""); setRoomMembers(1); setMessages([]); };
   const handleSendReaction = (emoji) => {
     if (!roomId) return;

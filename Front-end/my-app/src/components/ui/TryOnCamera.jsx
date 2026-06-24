@@ -12,40 +12,27 @@ const FLASK_BASE        = 'http://localhost:5001';
 const FRAME_INTERVAL_MS = 66;
 const CAPTURE_QUALITY   = 0.7;
 
-// ─── GlassesModel ─────────────────────────────────────────────────────────────
-//
-// GLB structure (Blender export):
-//   Node "Nose bone"      → mesh "model"       (front frame, 13,565 verts)
-//   Node "Left Ear bone"  → mesh "model.001"   (left arm  — folded closed)
-//   Node "Right Ear bone" → mesh "model.002"   (right arm — folded closed)
-//   All nodes: 90° X-axis rotation baked in
-//
-// Strategy: clone ONLY the "Nose bone" node and render it.
-// The arm nodes are never cloned or added to the scene, so they cannot appear.
+
 
 function GlassesModel({ url, landmarkRef }) {
   const { scene } = useGLTF(url);
 
-  // ── Refs for the three independent groups ─────────────────────────────────
-  const noseRef  = useRef();   // front frame
-  const leftRef  = useRef();   // left arm
-  const rightRef = useRef();   // right arm
+  const frameGroupRef = useRef();
 
-  // ── frameData holds one-time measurements computed in useEffect ───────────
-  // naturalScale   : 1 / frontFrameWidth  — scales nose mesh so its X width = 1 world unit
-  // centerOffset   : bounding-box center of the nose mesh (to center it on the anchor)
-  // leftArmLength  : natural length of the left arm mesh (longest axis, world units)
-  // rightArmLength : natural length of the right arm mesh (longest axis, world units)
-  // leftArmOffset  : bounding-box center of the left arm mesh (to pivot from hinge end)
-  // rightArmOffset : bounding-box center of the right arm mesh
+  const leftPivotRef  = useRef();
+  const rightPivotRef = useRef();
+
+  const leftArmRef  = useRef();
+  const rightArmRef = useRef();
+
   const frameData = useRef(null);
-  const _armDir   = useRef(new Vector3());
-  const _armQuat  = useRef(new Quaternion());
 
-  // ── Clones stored in state so React re-renders when they are ready ─────────
-  const [clones, setClones] = useState(null);   // { nose, left, right }
+  const _v3a = useRef(new Vector3());
+  const _v3b = useRef(new Vector3());
+  const _q   = useRef(new Quaternion());
 
-  /** Measure arm mesh: natural length, local length axis, scale axis letter. */
+  const [clones, setClones] = useState(null);
+
   function measureArm(clone) {
     const bb = new Box3().setFromObject(clone);
     const sz = new Vector3(); bb.getSize(sz);
@@ -54,7 +41,6 @@ function GlassesModel({ url, landmarkRef }) {
     const scaleAxis =
       sz.x >= sz.y && sz.x >= sz.z ? 'x' :
       sz.y >= sz.x && sz.y >= sz.z ? 'y' : 'z';
-    // Bone origin ≈ hinge; bbox center points from hinge toward arm tip (folded inward in GLB).
     const localAxis = c.length() > 1e-4
       ? c.clone().normalize()
       : new Vector3(
@@ -64,32 +50,14 @@ function GlassesModel({ url, landmarkRef }) {
         );
     return { length, localAxis, scaleAxis, center: c };
   }
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // useEffect — runs ONCE per GLB load
-  // PURPOSE:
-  //   1. Find the three bone nodes by name in the loaded scene
-  //   2. Clone each one independently (so transforms don't interfere)
-  //   3. Measure bounding boxes:
-  //        • nose  → naturalScale + centerOffset  (for front-frame placement)
-  //        • left  → leftArmLength  + leftArmOffset  (for arm scaling/pivoting)
-  //        • right → rightArmLength + rightArmOffset
-  //   4. Log the pivot center of each arm — if it prints near (0,0,0) the
-  //      pivot is at the hinge end (good). If not, the armOffset corrects it.
-  // ════════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     frameData.current = null;
     setClones(null);
 
-    // ── 1. Find nodes ────────────────────────────────────────────────────────
-    console.log('[GlassesModel] scene nodes:');
-    scene.traverse((obj) =>
-      console.log('  type=' + obj.type + ' name=>>>' + obj.name + '<<< isMesh=' + obj.isMesh)
-    );
-
     let noseNode = null, leftNode = null, rightNode = null;
+
     scene.traverse((obj) => {
-      const n = obj.name.trim().toLowerCase();
+      const n = obj.name.trim().toLowerCase().replace(/_/g, ' ');
       if (!noseNode  && n === 'nose bone')      noseNode  = obj;
       if (!leftNode  && n === 'left ear bone')  leftNode  = obj;
       if (!rightNode && n === 'right ear bone') rightNode = obj;
@@ -103,66 +71,47 @@ function GlassesModel({ url, landmarkRef }) {
       console.warn('[GlassesModel] Arm nodes not found — arms will not render');
     }
 
-    // ── 2. Clone each node independently ─────────────────────────────────────
     const noseClone  = noseNode.clone(true);
     const leftClone  = leftNode  ? leftNode.clone(true)  : null;
     const rightClone = rightNode ? rightNode.clone(true) : null;
 
-    // ── 3. Measure nose bounding box ─────────────────────────────────────────
+    if (noseClone)  noseClone.position.set(0, 0, 0);
+    if (leftClone)  leftClone.position.set(0, 0, 0);
+    if (rightClone) rightClone.position.set(0, 0, 0);
+
     const noseBB = new Box3().setFromObject(noseClone);
     const noseSz = new Vector3(); noseBB.getSize(noseSz);
     const noseC  = new Vector3(); noseBB.getCenter(noseC);
     const fw     = Math.max(noseSz.x, 0.001);
+
     console.log('[GlassesModel] nose fw=' + fw.toFixed(3)
       + ' center=(' + noseC.x.toFixed(3) + ',' + noseC.y.toFixed(3) + ')');
 
-    // ── 3b. Measure arm bounding boxes ───────────────────────────────────────
-    // leftArmLength / rightArmLength: natural length of each arm mesh (longest bounding-box axis).
-    //   Used in useFrame to compute scale = desiredWorldLength / naturalLength.
-    //
-    // leftArmOffset / rightArmOffset: bounding-box center of the arm in its
-    //   LOCAL space. If the Blender pivot is at the hinge end the center will
-    //   be ~half the arm length away from origin. We subtract this offset so
-    //   the hinge end of the arm sits exactly at the hinge landmark position.
-    //
-    // 👇 THIS IS WHERE "Left arm center" IS LOGGED:
-    //   • Near (0, 0, 0) → pivot IS at the hinge end (ideal, no extra offset needed)
-    //   • e.g. (0.4, 0, 0) → pivot is at the arm midpoint; offset will correct it
-    let leftArmLength = 1, leftArmAxis = new Vector3(0, 0, 1), leftArmScaleAxis = 'z';
-    let rightArmLength = 1, rightArmAxis = new Vector3(0, 0, 1), rightArmScaleAxis = 'z';
+    // ── 3b. Measure arms ───────────────────────────────────────────────────
+    let leftArmData  = { length: 1, localAxis: new Vector3(0, 0, 1), scaleAxis: 'z' };
+    let rightArmData = { length: 1, localAxis: new Vector3(0, 0, 1), scaleAxis: 'z' };
 
     if (leftClone) {
-      const m = measureArm(leftClone);
-      leftArmLength = m.length;
-      leftArmAxis = m.localAxis;
-      leftArmScaleAxis = m.scaleAxis;
-      console.log('[GlassesModel] Left arm center:', m.center.x.toFixed(3), m.center.y.toFixed(3), m.center.z.toFixed(3),
-        '| natural length (max axis):', leftArmLength.toFixed(3),
-        '| local axis:', leftArmAxis.x.toFixed(3), leftArmAxis.y.toFixed(3), leftArmAxis.z.toFixed(3),
-        '| scale axis:', leftArmScaleAxis);
+      leftArmData = measureArm(leftClone);
+      console.log('[GlassesModel] Left arm length:', leftArmData.length.toFixed(3),
+        'axis:', leftArmData.localAxis.x.toFixed(3), leftArmData.localAxis.y.toFixed(3), leftArmData.localAxis.z.toFixed(3));
     }
     if (rightClone) {
-      const m = measureArm(rightClone);
-      rightArmLength = m.length;
-      rightArmAxis = m.localAxis;
-      rightArmScaleAxis = m.scaleAxis;
-      console.log('[GlassesModel] Right arm center:', m.center.x.toFixed(3), m.center.y.toFixed(3), m.center.z.toFixed(3),
-        '| natural length (max axis):', rightArmLength.toFixed(3),
-        '| local axis:', rightArmAxis.x.toFixed(3), rightArmAxis.y.toFixed(3), rightArmAxis.z.toFixed(3),
-        '| scale axis:', rightArmScaleAxis);
+      rightArmData = measureArm(rightClone);
+      console.log('[GlassesModel] Right arm length:', rightArmData.length.toFixed(3),
+        'axis:', rightArmData.localAxis.x.toFixed(3), rightArmData.localAxis.y.toFixed(3), rightArmData.localAxis.z.toFixed(3));
     }
 
-    // ── 4. Store all measurements ─────────────────────────────────────────────
     frameData.current = {
       naturalScale:   1 / fw,
       centerOffset:   { x: noseC.x, y: noseC.y },
-      leftArmLength,  leftArmAxis,  leftArmScaleAxis,
-      rightArmLength, rightArmAxis, rightArmScaleAxis,
+      halfLocalWidth: fw / 2,     // in model's local units
+      leftArm:        leftArmData,
+      rightArm:       rightArmData,
     };
 
     setClones({ nose: noseClone, left: leftClone, right: rightClone });
 
-    // Cleanup: dispose geometry + materials when GLB changes
     return () => {
       [noseClone, leftClone, rightClone].forEach((c) => {
         if (!c) return;
@@ -178,117 +127,105 @@ function GlassesModel({ url, landmarkRef }) {
     };
   }, [scene]);
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // useFrame — runs EVERY FRAME (60 fps)
-  // PURPOSE:
-  //   Apply the latest landmark transform to each of the three mesh groups.
-  //
-  // Front frame (noseRef):
-  //   • Positioned at the eye-midpoint anchor (world space)
-  //   • Scaled so its X-width matches the hinge-to-hinge pixel distance
-  //   • Rotated for head tilt (rotationZ) and head turn (rotationY)
-  //
-  // Arms (leftRef / rightRef):
-  //   • Positioned at their respective hinge landmark (world space)
-  //   • Rotated so they point from hinge → ear tip (Math.atan2 of that vector)
-  //   • Scaled independently so their length matches the pixel hinge→ear distance
-  //
-  // 👇 THIS IS WHERE armWorldLength SCALING IS APPLIED (inside the arm blocks):
-  //   armScale = desiredWorldLength / naturalArmLength
-  //   ref.scale.set(finalFrameScale, finalFrameScale, armScale)
-  //   Z is stretched to match hinge→ear distance (arm length runs along Z after
-  //   the 90° baked X-rotation); X/Y use the front-frame scale for thickness.
-  // ════════════════════════════════════════════════════════════════════════════
+
   useFrame(() => {
     const fd = frameData.current;
     const lm = landmarkRef.current;
-    const allHidden = !fd || !lm || !isFinite(lm.position?.x) || !isFinite(lm.scale);
+    const hidden = !fd || !lm || !isFinite(lm.position?.x) || !isFinite(lm.scale);
 
-    // Hide everything if no face detected
-    [noseRef, leftRef, rightRef].forEach((r) => {
-      if (r.current) r.current.visible = !allHidden;
-    });
-    if (allHidden) return;
+    if (frameGroupRef.current) frameGroupRef.current.visible = !hidden;
+    if (hidden) return;
 
     const { position, scale, rotationZ, rotationY,
             leftHinge, leftEar, rightHinge, rightEar } = lm;
 
     const finalFrameScale = fd.naturalScale * scale;
+    const tiltZ = rotationZ ?? 0;
+    const turnY = (rotationY ?? 0) * -1.5;
 
-    // ── Front frame ───────────────────────────────────────────────────────────
-    if (noseRef.current) {
-      noseRef.current.visible = true;
-      noseRef.current.position.set(
-        position.x - fd.centerOffset.x * finalFrameScale,
-        position.y - fd.centerOffset.y * finalFrameScale,
-        0.05,
-      );
-      noseRef.current.scale.setScalar(finalFrameScale);
-      noseRef.current.rotation.set(0, rotationY ?? 0, rotationZ ?? 0);
+    // ── 1. Frame group: world-space transform ────────────────────────────────
+    const fg = frameGroupRef.current;
+    if (!fg) return;
+
+    const frameX = position.x - fd.centerOffset.x * finalFrameScale;
+    const frameY = position.y - fd.centerOffset.y * finalFrameScale;
+    const frameZ = 0.08;
+
+    fg.position.set(frameX, frameY, frameZ);
+    fg.rotation.set(0, turnY, tiltZ);
+    fg.scale.setScalar(finalFrameScale);
+
+    const inwardOffset = 0.18; 
+    
+    const verticalOffset = 0.1; 
+    
+    if (leftPivotRef.current) {
+      leftPivotRef.current.position.set(-fd.halfLocalWidth + inwardOffset, verticalOffset, 0);
     }
-
-    // ── Left arm ──────────────────────────────────────────────────────────────
-    if (leftRef.current && leftHinge && leftEar) {
-      const ldx = leftEar.x - leftHinge.x;
-      const ldy = leftEar.y - leftHinge.y;
-      const leftArmWorldLength = Math.sqrt(ldx * ldx + ldy * ldy);
-      const leftArmScale = leftArmWorldLength / fd.leftArmLength;
-
-      _armDir.current.set(ldx, ldy, 0).normalize();
-      _armQuat.current.setFromUnitVectors(fd.leftArmAxis, _armDir.current);
-
-      leftRef.current.visible = true;
-      leftRef.current.position.set(leftHinge.x, leftHinge.y, 0.05);
-      leftRef.current.quaternion.copy(_armQuat.current);
-      leftRef.current.scale.set(
-        fd.leftArmScaleAxis === 'x' ? finalFrameScale * leftArmScale : finalFrameScale,
-        fd.leftArmScaleAxis === 'y' ? finalFrameScale * leftArmScale : finalFrameScale,
-        fd.leftArmScaleAxis === 'z' ? finalFrameScale * leftArmScale : finalFrameScale,
-      );
+    if (rightPivotRef.current) {
+      rightPivotRef.current.position.set(fd.halfLocalWidth - inwardOffset, verticalOffset, 0);
     }
+  
+    const faceWidth = Math.abs(rightHinge.x - leftHinge.x);
 
-    // ── Right arm ─────────────────────────────────────────────────────────────
-    if (rightRef.current && rightHinge && rightEar) {
-      const rdx = rightEar.x - rightHinge.x;
-      const rdy = rightEar.y - rightHinge.y;
-      const rightArmWorldLength = Math.sqrt(rdx * rdx + rdy * rdy);
-      const rightArmScale = rightArmWorldLength / fd.rightArmLength;
+    const orientArm = (pivotRef, armRef, earLandmark, armData) => {
+      if (!pivotRef.current || !armRef.current || !earLandmark) return;
 
-      _armDir.current.set(rdx, rdy, 0).normalize();
-      _armQuat.current.setFromUnitVectors(fd.rightArmAxis, _armDir.current);
+      const pivot = pivotRef.current;
+      const arm   = armRef.current;
 
-      rightRef.current.visible = true;
-      rightRef.current.position.set(rightHinge.x, rightHinge.y, 0.05);
-      rightRef.current.quaternion.copy(_armQuat.current);
-      rightRef.current.scale.set(
-        fd.rightArmScaleAxis === 'x' ? finalFrameScale * rightArmScale : finalFrameScale,
-        fd.rightArmScaleAxis === 'y' ? finalFrameScale * rightArmScale : finalFrameScale,
-        fd.rightArmScaleAxis === 'z' ? finalFrameScale * rightArmScale : finalFrameScale,
+      pivot.getWorldPosition(_v3a.current);
+
+      const estimatedZ = -faceWidth * 0.8; 
+      
+      const earDrop = 0.08; 
+      
+      _v3b.current.set(earLandmark.x, earLandmark.y - earDrop, estimatedZ);
+
+      _v3b.current.sub(_v3a.current);
+      const worldDist = _v3b.current.length();
+
+      pivot.getWorldQuaternion(_q.current);
+      _q.current.invert();
+      _v3b.current.applyQuaternion(_q.current);
+
+      const localDir = _v3b.current.clone().normalize();
+      const armQuat = new Quaternion().setFromUnitVectors(armData.localAxis, localDir);
+      arm.quaternion.copy(armQuat);
+
+      const localDist = worldDist / finalFrameScale;
+      const armScale = localDist / armData.length;
+
+      arm.scale.set(
+        armData.scaleAxis === 'x' ? armScale : 1,
+        armData.scaleAxis === 'y' ? armScale : 1,
+        armData.scaleAxis === 'z' ? armScale : 1,
       );
-    }
+    };
+
+    orientArm(leftPivotRef,  leftArmRef,  leftEar,  fd.leftArm);
+    orientArm(rightPivotRef, rightArmRef, rightEar, fd.rightArm);
   });
 
   return (
-    <>
-      {/* Front frame — Nose bone mesh */}
-      <group ref={noseRef}>
-        {clones?.nose && <primitive object={clones.nose} />}
+    <group ref={frameGroupRef}>
+      {clones?.nose && <primitive object={clones.nose} />}
+
+      <group ref={leftPivotRef}>
+        <group ref={leftArmRef}>
+          {clones?.left && <primitive object={clones.left} />}
+        </group>
       </group>
 
-      {/* Left arm — Left Ear bone mesh */}
-      <group ref={leftRef}>
-        {clones?.left && <primitive object={clones.left} />}
+      <group ref={rightPivotRef}>
+        <group ref={rightArmRef}>
+          {clones?.right && <primitive object={clones.right} />}
+        </group>
       </group>
-
-      {/* Right arm — Right Ear bone mesh */}
-      <group ref={rightRef}>
-        {clones?.right && <primitive object={clones.right} />}
-      </group>
-    </>
+    </group>
   );
 }
 
-// ─── ContextLostHandler ───────────────────────────────────────────────────────
 
 function ContextLostHandler() {
   const { gl } = useThree();
@@ -306,7 +243,6 @@ function ContextLostHandler() {
   return null;
 }
 
-// ─── TryOnCamera ─────────────────────────────────────────────────────────────
 
 export default function TryOnCamera({ glbModel, onClose }) {
   const videoRef       = useRef(null);

@@ -13,7 +13,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
 import { useCart } from '@/contexts/CartContext';
 import { useWishlist } from '@/contexts/WishlistContext';
-import io from "socket.io-client";
 
 function StarRating({ rating, interactive = false, value = 0, onChange }) {
   const [hovered, setHovered] = useState(0);
@@ -58,8 +57,6 @@ export default function ProductDetailPage() {
   const [reviewComment, setReviewComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const [resultImage, setResultImage] = useState(null);
-  const [tryOnLoading, setTryOnLoading] = useState(false);
   const [selectedColor, setSelectedColor] = useState(null);
 
   const availableColors = [
@@ -87,44 +84,7 @@ export default function ProductDetailPage() {
 
 
 
-    useEffect(() => {
-      const socket = io("http://localhost:5000");
-
-      socket.on("tryOnCompleted", (data) => {
-        setResultImage(data.resultImage);
-        setTryOnLoading(false);
-      });
-
-      socket.on("tryOnCount", (data) => {
-        console.log("🔥 Count:", data.count);
-      });
-
-      return () => socket.disconnect();
-    }, []);
-
-
   useEffect(() => { if (id) loadProduct(); }, [id]);
-
-
-const handleTryOn = async () => {
-  if (!user) {
-    toast.error("Please login first");
-    return;
-  }
-
-  setTryOnLoading(true);
-
-  await fetch("http://localhost:5000/api/try-on", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      userId: user._id,
-      productId: product._id
-    })
-  });
-};
 
 
   const handleAddToCart = async () => {
@@ -270,13 +230,15 @@ const handleTryOn = async () => {
                 </div>
                 <div className="flex gap-3">
 
-                  {/* Try on button */}
-                  <button
-                    onClick={handleTryOn}
-                    className="px-4 py-3.5 bg-blue-600 text-white rounded-xl hover:opacity-90 transition"
-                  >
-                    Try On 👕
-                  </button>
+                  {/* Try On button — Clothes only → forwards to Find My Fit */}
+                  {product.category === 'Clothes' && (
+                    <button
+                      onClick={() => router.push('/find-my-fit')}
+                      className="px-4 py-3.5 bg-blue-600 text-white rounded-xl hover:opacity-90 active:scale-[0.98] transition-all"
+                    >
+                      Try On 👕
+                    </button>
+                  )}
 
                   {/* Live camera try-on — navigates to /try-on/[id] room */}
                   {product.glbModel && product.category === 'Accessories' && (
@@ -325,12 +287,6 @@ const handleTryOn = async () => {
                     </div>
                   </div>
                 )}
-
-                  // Try-On Result
-                  {tryOnLoading && <p>Processing... ⏳</p>}
-                  {resultImage && (
-                    <img src={resultImage} className="w-64 mt-4" />
-                  )}
 
               </div>
             )}

@@ -1,16 +1,4 @@
-"""
-Phase 5 — Glasses Overlay (Improved)
 
-Problems fixed over the basic version:
-  1. Width based on face_edge points (not eye distance) — matches actual face width
-  2. Horizontal anchor uses face-edge midpoint — stable when head turns
-     (nose_bridge Y is retained for vertical nose-pad alignment)
-  3. Perspective warp using 4 anchor points — handles head rotation correctly
-     When face turns, face_edge points compress on far side naturally
-  4. Opaque bbox detection — like shirt, maps actual lens region not image padding
-  5. Landmark smoothing — no jitter on glasses
-  6. Supports both tuple (x, y) and dict {"x", "y", "z"} landmark formats
-"""
 
 import cv2
 import numpy as np
@@ -94,25 +82,7 @@ def _feather_edges(glasses: np.ndarray, radius: int) -> np.ndarray:
 
 
 def _compute_dst_points(landmarks: dict, glasses_img: np.ndarray) -> np.ndarray:
-    """
-    Compute 4 destination points on the frame where glasses corners should land.
-
-    The key insight: we use face_edge points as the temple anchors.
-    MediaPipe's face_edge landmarks (234, 454) sit at the sides of the face
-    right where glasses temples would rest. When the head rotates, these
-    points naturally move closer/further from the eyes — giving us correct
-    perspective foreshortening for free.
-
-    Horizontal centering uses the midpoint of the face edges (not the nose
-    bridge) so that glasses stay centered on the face when the head turns.
-    The nose protrudes and shifts faster than the face boundary, so anchoring
-    purely to it would cause the glasses to slide sideways.
-
-    Vertical positioning still uses nose_bridge (landmark 168) because that
-    corresponds to the physical nose-pad height where glasses rest.
-
-    Returns 4 points: [top-left, top-right, bot-left, bot-right]
-    """
+  
     le  = _pt(landmarks["left_eye"])
     re  = _pt(landmarks["right_eye"])
     nb  = _pt(landmarks["nose_bridge"])
@@ -121,26 +91,18 @@ def _compute_dst_points(landmarks: dict, glasses_img: np.ndarray) -> np.ndarray:
 
     img_h, img_w = glasses_img.shape[:2]
 
-    # ── Glasses width: face_edge to face_edge × scale ────────────────────────
-    # Using face edges (not eye distance) means glasses always match face width
-    # and rotate correctly with the head
     face_width_vec = rfe - lfe
     face_width     = np.linalg.norm(face_width_vec)
     face_dir       = face_width_vec / (face_width + 1e-6)
 
     glasses_half_w = face_width * GLASSES_WIDTH_SCALE / 2
 
-    # ── Horizontal anchor: face-edge midpoint ────────────────────────────────
-    # Using the geometric midpoint of face edges keeps glasses centered on the
-    # face boundary rather than the nose (which shifts on head turn).
-    # Vertical anchor is still nose_bridge Y for correct nose-pad height.
     face_mid = (lfe + rfe) / 2
     anchor   = np.array([face_mid[0], nb[1]], dtype=np.float32)
 
     left_pt  = anchor - face_dir * glasses_half_w    # left temple on frame
     right_pt = anchor + face_dir * glasses_half_w    # right temple on frame
 
-    # ── Glasses height: from image aspect ratio ────────────────────────────────
     x_min, y_min, x_max, y_max = _get_opaque_bbox(glasses_img)
     bbox_w  = max(x_max - x_min, 1)
     bbox_h  = max(y_max - y_min, 1)
@@ -149,10 +111,6 @@ def _compute_dst_points(landmarks: dict, glasses_img: np.ndarray) -> np.ndarray:
     glasses_h = face_width * GLASSES_WIDTH_SCALE * aspect
     half_h    = glasses_h / 2
 
-    # ── Vertical extent: perpendicular to face axis ──────────────────────────
-    # perp_dir points "downward" in the face-local frame (perpendicular to
-    # the face-edge axis, into increasing image-y when the face is upright).
-    # GLASSES_VERT_OFFSET shifts up/down for fine tuning.
     perp_dir = np.array([-face_dir[1], face_dir[0]])   # perpendicular to face line
     center_y_offset = perp_dir * half_h * GLASSES_VERT_OFFSET
 
@@ -171,11 +129,7 @@ def _compute_dst_points(landmarks: dict, glasses_img: np.ndarray) -> np.ndarray:
 
 def _warp_glasses(glasses: np.ndarray, landmarks: dict,
                   frame_w: int, frame_h: int) -> np.ndarray:
-    """
-    Warp glasses image onto the frame using perspective transform.
-    Maps opaque bbox corners → computed face anchor points.
-    Returns full-frame BGRA with glasses warped into position.
-    """
+  
     x_min, y_min, x_max, y_max = _get_opaque_bbox(glasses)
 
     # Source: corners of the actual opaque glasses region
@@ -211,21 +165,7 @@ def _blend_fullframe(frame: np.ndarray, warped: np.ndarray) -> np.ndarray:
 def overlay_glasses(frame: np.ndarray, landmarks: dict,
                     glasses: np.ndarray,
                     glasses_feathered: np.ndarray) -> np.ndarray:
-    """
-    Main entry point — called every frame.
-
-    Parameters:
-      frame             : BGR camera frame (already mirrored)
-      landmarks         : from face_tracker.get_landmarks()
-      glasses           : original BGRA glasses image
-      glasses_feathered : pre-feathered version from prepare_glasses()
-
-    Flow:
-      1. Smooth landmarks   → no jitter
-      2. Compute 4 anchor points on face (temples + top/bottom)
-      3. Perspective warp glasses into position
-      4. Alpha blend onto frame
-    """
+ 
     if landmarks is None or glasses is None:
         return frame
 
@@ -240,8 +180,5 @@ def overlay_glasses(frame: np.ndarray, landmarks: dict,
 
 
 def prepare_glasses(glasses: np.ndarray) -> np.ndarray:
-    """
-    Pre-process glasses once at startup — applies edge feathering.
-    Call once after load_glasses() and pass result to overlay_glasses().
-    """
+
     return _feather_edges(glasses, radius=FEATHER_RADIUS)

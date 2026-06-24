@@ -1,12 +1,4 @@
-"""
-Landmark Smoother
-Keeps a rolling buffer of the last N frames of landmark positions
-and returns the average. Eliminates jitter from raw MediaPipe output.
 
-Supports two landmark formats:
-  - Tuple format: {"left_shoulder": (x, y), ...}  ← used by body_tracker
-  - Dict format:  {"left_eye": {"x": 265, "y": 200, "z": -0.034}, ...}  ← used by face_tracker
-"""
 
 from collections import deque
 import numpy as np
@@ -14,25 +6,12 @@ import numpy as np
 
 class LandmarkSmoother:
     def __init__(self, buffer_size=5):
-        """
-        buffer_size → how many past frames to average.
-        5 = smooth but still responsive to real movement.
-        """
+     
         self.buffer_size = buffer_size
         self._buffers: dict[str, deque] = {}
 
     def smooth(self, landmarks: dict | None) -> dict | None:
-        """
-        Accept landmarks in either format and return smoothed version.
-
-        Tuple format: {"key": (x, y)}
-          → buffers (x, y), returns (x, y)
-
-        Dict format:  {"key": {"x": int, "y": int, "z": float}}
-          → buffers (x, y, z), returns {"x": int, "y": int, "z": float}
-
-        Returns None if input is None.
-        """
+   
         if landmarks is None:
             return None
 

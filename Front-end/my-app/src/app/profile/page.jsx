@@ -153,22 +153,45 @@ function OrdersTab() {
 }
 
 const ProfilePage = () => {
-  const { user, logout } = useAuth()
+  const { user, login, logout } = useAuth()
   const { wishlistItems, loading: wishlistLoading } = useWishlist()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('Account')
+
+  // ── Measurements ──────────────────────────────────────────────────────────
   const [measurements, setMeasurements] = useState({
     height: '', weight: '', chest: '', waist: '', hips: '', inseam: ''
   })
   const [saved, setSaved] = useState(false)
 
+  // ── Edit profile state ────────────────────────────────────────────────────
+  const [editForm, setEditForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
+  const [avatarPreview, setAvatarPreview] = useState(null)
+  const [editSaving, setEditSaving]   = useState(false)
+  const [editSuccess, setEditSuccess] = useState('')
+  const [editError,   setEditError]   = useState('')
+  const fileInputRef = React.useRef(null)
+
+  // ── Delete account state ───────────────────────────────────────────────────
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteInput,       setDeleteInput]       = useState('')
+  const [deleting,          setDeleting]          = useState(false)
+
   React.useEffect(() => {
-    if (!user) router.push('/login')
+    if (!user) { router.push('/login'); return }
+    // Pre-fill form with current values
+    setEditForm({ name: user.name || '', email: user.email || '', password: '', confirmPassword: '' })
+    // Load saved avatar from localStorage
+    const storedAvatar = localStorage.getItem(`avatar_${user._id}`)
+    if (storedAvatar) setAvatarPreview(storedAvatar)
+    // Load measurements
     const stored = localStorage.getItem('measurements')
     if (stored) setMeasurements(JSON.parse(stored))
   }, [user, router])
 
   if (!user) return null
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleSaveMeasurements = () => {
     localStorage.setItem('measurements', JSON.stringify(measurements))
@@ -179,6 +202,73 @@ const ProfilePage = () => {
   const handleLogout = () => {
     logout()
     router.push('/')
+  }
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setEditError('Please choose an image file.'); return }
+    const reader = new FileReader()
+    reader.onload = () => {
+      const base64 = reader.result
+      setAvatarPreview(base64)
+      // Persist avatar per-user in localStorage (no backend change needed)
+      localStorage.setItem(`avatar_${user._id}`, base64)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleEditSave = async (e) => {
+    e.preventDefault()
+    setEditError('')
+    setEditSuccess('')
+
+    if (editForm.password && editForm.password !== editForm.confirmPassword) {
+      setEditError('Passwords do not match.')
+      return
+    }
+    if (editForm.password && editForm.password.length < 8) {
+      setEditError('Password must be at least 8 characters.')
+      return
+    }
+
+    const payload = {}
+    if (editForm.name  && editForm.name  !== user.name)  payload.name  = editForm.name.trim()
+    if (editForm.email && editForm.email !== user.email) payload.email = editForm.email.trim()
+    if (editForm.password) payload.password = editForm.password
+
+    if (Object.keys(payload).length === 0) {
+      setEditError('No changes to save.')
+      return
+    }
+
+    setEditSaving(true)
+    try {
+      const { data } = await API.put('/api/users/profile', payload)
+      login(data)
+      setEditSuccess('Profile updated successfully.')
+      setEditForm(prev => ({ ...prev, password: '', confirmPassword: '' }))
+      setTimeout(() => setEditSuccess(''), 3000)
+    } catch (err) {
+      setEditError(err.response?.data?.message || 'Failed to update profile.')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true)
+    try {
+      await API.delete('/api/users/profile')
+      // Clear localStorage avatar
+      localStorage.removeItem(`avatar_${user._id}`)
+      logout()
+      router.push('/')
+    } catch (err) {
+      setDeleting(false)
+      setShowDeleteConfirm(false)
+      setEditError(err.response?.data?.message || 'Failed to delete account.')
+    }
   }
 
   return (
@@ -192,9 +282,23 @@ const ProfilePage = () => {
           transition={{ duration: 0.5 }}
           className="bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-8 flex flex-col sm:flex-row items-center sm:items-start gap-6"
         >
-          <div className="shrink-0 w-24 h-24 rounded-full bg-slate-900 dark:bg-white flex items-center justify-center text-white dark:text-slate-900 text-4xl font-bold">
-            {user.name?.charAt(0).toUpperCase()}
+          {/* Avatar — clickable to change */}
+          <div className="relative shrink-0 group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+            <div className="w-24 h-24 rounded-full overflow-hidden bg-slate-900 dark:bg-white flex items-center justify-center text-white dark:text-slate-900 text-4xl font-bold">
+              {avatarPreview
+                ? <img src={avatarPreview} alt="avatar" className="w-full h-full object-cover" />
+                : <span>{user.name?.charAt(0).toUpperCase()}</span>
+              }
+            </div>
+            <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
           </div>
+
           <div className="flex-1 text-center sm:text-left">
             <h1 className="text-3xl font-bold text-slate-900 dark:text-white">{user.name}</h1>
             <p className="text-slate-500 dark:text-slate-400 text-base mt-1">{user.email}</p>
@@ -239,35 +343,192 @@ const ProfilePage = () => {
 
           {activeTab === 'Account' && (
             <div className="space-y-6">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Account Details</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {[
-                  { label: 'Full Name', value: user.name },
-                  { label: 'Email Address', value: user.email },
-                  { label: 'Account Type', value: user.isAdmin ? 'Administrator' : 'Customer' },
-                  { label: 'Member Since', value: '2026' },
-                ].map(({ label, value }) => (
-                  <div key={label} className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                    <p className="text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-1">{label}</p>
-                    <p className="text-slate-900 dark:text-white text-base">{value}</p>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Edit Profile</h2>
+
+              <form onSubmit={handleEditSave} className="space-y-5">
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-1.5">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
+                    placeholder="Your name"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-base focus:outline-none focus:border-slate-400 dark:focus:border-slate-500 transition-colors"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-1.5">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
+                    placeholder="your@email.com"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-base focus:outline-none focus:border-slate-400 dark:focus:border-slate-500 transition-colors"
+                  />
+                </div>
+
+                {/* Divider */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <p className="text-sm text-slate-400 dark:text-slate-500 mb-4">
+                    Leave password fields empty to keep your current password.
+                  </p>
+                </div>
+
+                {/* New Password */}
+                <div>
+                  <label className="block text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-1.5">
+                    New Password
+                  </label>
+                  <input
+                    type="password"
+                    value={editForm.password}
+                    onChange={e => setEditForm(p => ({ ...p, password: e.target.value }))}
+                    placeholder="Min 8 characters"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-base focus:outline-none focus:border-slate-400 dark:focus:border-slate-500 transition-colors"
+                  />
+                </div>
+
+                {/* Confirm Password */}
+                <div>
+                  <label className="block text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-1.5">
+                    Confirm New Password
+                  </label>
+                  <input
+                    type="password"
+                    value={editForm.confirmPassword}
+                    onChange={e => setEditForm(p => ({ ...p, confirmPassword: e.target.value }))}
+                    placeholder="Repeat new password"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-base focus:outline-none focus:border-slate-400 dark:focus:border-slate-500 transition-colors"
+                  />
+                </div>
+
+                {/* Profile Photo */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-700">
+                  <label className="block text-sm font-semibold tracking-widest uppercase text-slate-400 dark:text-slate-500 mb-3">
+                    Profile Photo
+                  </label>
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-2xl font-bold text-slate-600 dark:text-slate-300 shrink-0">
+                      {avatarPreview
+                        ? <img src={avatarPreview} alt="preview" className="w-full h-full object-cover" />
+                        : <span>{user.name?.charAt(0).toUpperCase()}</span>
+                      }
+                    </div>
+                    <div className="space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-4 py-2 text-sm font-medium border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        Choose Photo
+                      </button>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">JPG, PNG or WebP · Stored locally</p>
+                    </div>
                   </div>
-                ))}
+                </div>
+
+                {/* Feedback */}
+                {editError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-sm text-red-700 dark:text-red-400">
+                    {editError}
+                  </div>
+                )}
+                {editSuccess && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl text-sm text-emerald-700 dark:text-emerald-400">
+                    {editSuccess}
+                  </div>
+                )}
+
+                {/* Submit */}
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={editSaving}
+                    className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-base font-medium rounded-full hover:bg-slate-700 dark:hover:bg-slate-100 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {editSaving && <span className="w-4 h-4 border-2 border-white/30 dark:border-slate-900/30 border-t-white dark:border-t-slate-900 rounded-full animate-spin" />}
+                    {editSaving ? 'Saving…' : 'Save Changes'}
+                  </button>
+                  <Link
+                    href="/product"
+                    className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-base font-medium rounded-full hover:border-slate-900 dark:hover:border-white hover:text-slate-900 dark:hover:text-white transition-colors"
+                  >
+                    Browse Products
+                  </Link>
+                </div>
+              </form>
+
+              {/* ── Danger zone ─────────────────────────────────────────── */}
+              <div className="mt-8 pt-6 border-t border-red-100 dark:border-red-900/30">
+                <h3 className="text-sm font-semibold uppercase tracking-widest text-red-500 dark:text-red-400 mb-2">
+                  Danger Zone
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                  Permanently delete your account and all associated data. This cannot be undone.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteConfirm(true); setDeleteInput('') }}
+                  className="px-5 py-2.5 text-sm font-medium border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  Delete My Account
+                </button>
               </div>
 
-              <div className="pt-4 flex flex-wrap gap-3">
-                <Link
-                  href="/product"
-                  className="px-6 py-3 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-base font-medium rounded-full hover:bg-slate-700 dark:hover:bg-slate-100 transition-colors duration-200"
-                >
-                  Browse Products
-                </Link>
-                <Link
-                  href="/try-on"
-                  className="px-6 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-base font-medium rounded-full hover:border-slate-900 dark:hover:border-white hover:text-slate-900 dark:hover:text-white transition-colors duration-200"
-                >
-                  Virtual Try-On
-                </Link>
-              </div>
+              {/* ── Delete confirm modal ──────────────────────────────── */}
+              {showDeleteConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
+                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+                  <div
+                    onClick={e => e.stopPropagation()}
+                    className="relative w-full max-w-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-8 shadow-2xl space-y-5"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mx-auto">
+                      <svg className="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      </svg>
+                    </div>
+                    <div className="text-center">
+                      <h3 className="text-lg font-bold text-slate-900 dark:text-white">Delete Account</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        Type <span className="font-semibold text-slate-700 dark:text-slate-300">DELETE</span> to confirm.
+                      </p>
+                    </div>
+                    <input
+                      type="text"
+                      value={deleteInput}
+                      onChange={e => setDeleteInput(e.target.value)}
+                      placeholder="DELETE"
+                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-center text-base font-mono tracking-widest text-slate-900 dark:text-white focus:outline-none focus:border-red-400 transition-colors"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="flex-1 py-3 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-sm font-medium rounded-full hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteInput !== 'DELETE' || deleting}
+                        onClick={handleDeleteAccount}
+                        className="flex-1 py-3 bg-red-500 text-white text-sm font-medium rounded-full hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                      >
+                        {deleting && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                        {deleting ? 'Deleting…' : 'Delete Forever'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
