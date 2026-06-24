@@ -1,10 +1,26 @@
 'use client'
 
 import React from 'react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/contexts/AuthContext'
+// import Link from 'next/link'
 import { motion } from 'framer-motion'
 
 const Herosection = () => {
+
+  const router = useRouter()
+  const { user, loading } = useAuth()
+
+  const handleTryOnRedirect = (e) => {
+    e.preventDefault()
+    if (loading) return
+    if (user) {
+      router.push('/find-my-fit')
+    } else {
+      router.push('/login')
+    }
+  }
+
   return (
     <section className="relative bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white overflow-hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -59,12 +75,13 @@ const Herosection = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.3 }}
           >
-            <Link
-              href="/try-on"
+            <button
+              onClick={handleTryOnRedirect}
+              disabled={loading}
               className="inline-block px-8 py-3 text-sm font-medium tracking-wider bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors duration-200"
             >
-              START TRYING
-            </Link>
+              {loading ? 'LOADING PROFILE...' : 'START TRYING'}
+            </button>
           </motion.div>
 
         </div>

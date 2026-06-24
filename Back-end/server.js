@@ -12,6 +12,8 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const cartRoutes = require('./routes/cartRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const authRoutes = require('./routes/authRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
@@ -159,6 +161,8 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/try-on', require('./routes/tryOnRoutes'));
 app.use("/api/rooms", roomRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/auth", authRoutes);
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
     explorer: true,

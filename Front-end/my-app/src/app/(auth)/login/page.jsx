@@ -16,6 +16,7 @@ const Login = () => {
   const router = useRouter()
   const { toast } = useToast()
   const [showPassword, setShowPassword] = useState(false)
+  const [isResetting, setIsResetting] = useState(false)
 
   const formik = useFormik({
     initialValues: { email: '', password: '' },
@@ -94,9 +95,47 @@ const Login = () => {
                 <label className="block text-xs font-medium uppercase tracking-widest text-slate-600 dark:text-slate-300">
                   Password
                 </label>
-                <Link href="/auth/forgot-password" title="Reset password" className="text-xs text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
-                  Forgot?
-                </Link>
+                <button
+                    type="button"
+                    disabled={isResetting || formik.isSubmitting}
+                    onClick={async () => {
+                      const emailValue = formik.values.email;
+
+                      if (!emailValue) {
+                        toast.error("Please enter your email address first so we know where to send the link!");
+                        return;
+                      }
+
+                      try {
+                        setIsResetting(true);
+                        toast.info("Checking records and sending recovery link...");
+
+                        const response = await fetch("http://localhost:5000/api/auth/forgot-password", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ email: emailValue }),
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                          toast.success("Check your inbox! Reset link sent successfully.");
+                        } else {
+                          toast.error(data.message || "Could not process password recovery request.");
+                        }
+                      } catch (err) {
+                        toast.error("Network error trying to contact recovery server.");
+                      } finally {
+                        setIsResetting(false);
+                      }
+                    }}
+                    title="Reset password"
+                    className={`text-xs text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors ${
+                        isResetting ? "opacity-50 cursor-wait" : ""
+                    }`}
+                >
+                  {isResetting ? "Sending..." : "Forgot?"}
+                </button>
               </div>
               <div className="relative">
                 <input
