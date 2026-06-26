@@ -2,7 +2,7 @@ FROM node:20-slim
 
 WORKDIR /app
 
-RUN useradd -m -u 1000 user
+RUN useradd -m user
 RUN chown -R user:user /app
 
 USER user
