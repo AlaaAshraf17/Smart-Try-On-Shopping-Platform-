@@ -6,4 +6,4 @@ __pycache__/
 .DS_Store
 
 # MediaPipe model files — large binaries, download via download_models.py
-*.task
+
