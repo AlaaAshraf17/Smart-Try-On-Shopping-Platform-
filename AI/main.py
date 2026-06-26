@@ -254,4 +254,4 @@ if __name__ == "__main__":
     print("  Glasses (3D)   : POST http://localhost:5001/try-on/glasses/landmarks")
     print("  Reset          : POST http://localhost:5001/try-on/reset")
     print("─" * 50)
-    app.run(host="0.0.0.0", port=5001, debug=True, threaded=True)
+    app.run(host="0.0.0.0", port=5001, debug=False, threaded=True)
