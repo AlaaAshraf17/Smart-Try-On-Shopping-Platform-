@@ -168,7 +168,7 @@ function GlassesModel({ url, landmarkRef }) {
   
     const faceWidth = Math.abs(rightHinge.x - leftHinge.x);
 
-    const orientArm = (pivotRef, armRef, earLandmark, armData) => {
+    const orientArm = (pivotRef, armRef, earLandmark, armData, isLeft, xCorrection) => {
       if (!pivotRef.current || !armRef.current || !earLandmark) return;
 
       const pivot = pivotRef.current;
@@ -176,11 +176,12 @@ function GlassesModel({ url, landmarkRef }) {
 
       pivot.getWorldPosition(_v3a.current);
 
-      const estimatedZ = -faceWidth * 0.8; 
-      
+      const zTurnOffset = Math.sin(turnY) * (faceWidth * 0.6);
+      const estimatedZ = (-faceWidth * 0.8) + (isLeft ? zTurnOffset : -zTurnOffset); 
+
       const earDrop = 0.08; 
       
-      _v3b.current.set(earLandmark.x, earLandmark.y - earDrop, estimatedZ);
+      _v3b.current.set(earLandmark.x + xCorrection, earLandmark.y - earDrop, estimatedZ);
 
       _v3b.current.sub(_v3a.current);
       const worldDist = _v3b.current.length();
@@ -203,8 +204,9 @@ function GlassesModel({ url, landmarkRef }) {
       );
     };
 
-    orientArm(leftPivotRef,  leftArmRef,  leftEar,  fd.leftArm);
-    orientArm(rightPivotRef, rightArmRef, rightEar, fd.rightArm);
+    orientArm(leftPivotRef,  leftArmRef,  leftEar,  fd.leftArm,  true,  0);
+    
+    orientArm(rightPivotRef, rightArmRef, rightEar, fd.rightArm, false, 0.04);
   });
 
   return (
