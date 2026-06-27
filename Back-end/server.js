@@ -51,6 +51,7 @@ const http = require("http").createServer(app);
 const allowedOrigins = [
   "http://localhost:3000",
   "https://fit-me-tau.vercel.app",
+  "https://smart-try-on-shopping-platform-fh82zgpl3.vercel.app/",
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
