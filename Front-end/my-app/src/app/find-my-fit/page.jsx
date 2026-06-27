@@ -133,7 +133,7 @@ function JoinRoomModal({ onClose, onJoin, onCreate, dark }) {
           <p className="text-xs opacity-40 mt-1"> real-time </p>
         </div>
         <div className="space-y-3">
-          <input type="text" value={inputId} onChange={(e) => setInputId(e.target.value.toUpperCase())}
+          <input type="text" value={inputId} onChange={(e) => setInputId(e.target.value)}
             placeholder="FIT-1234"
             className={`w-full px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-widest border outline-none transition-all placeholder:opacity-30 ${dark ? "bg-white/5 border-white/10 focus:border-blue-500" : "bg-slate-50 border-slate-200 focus:border-blue-500"}`}
           />
@@ -296,7 +296,8 @@ export default function FindMyFitPage() {
   const garmentCache   = useRef({});
   const progressTimer  = useRef(null);
   const abortRef       = useRef(null);
-  const currentReqId   = useRef(null); 
+  const currentReqId   = useRef(null);
+  const roomIdRef      = useRef("");   // always holds the latest roomId — avoids stale closures
 
   const [clothes, setClothes]                 = useState([]);
   const [loadingClothes, setLoadingClothes]   = useState(true);
@@ -317,6 +318,9 @@ export default function FindMyFitPage() {
   const [queueLength, setQueueLength]         = useState(0);
   const [messages, setMessages]               = useState([]);   // persistent chat log
 
+  // Keep ref in sync so socket handlers always read the latest roomId
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+
   const addNotification = useCallback((text) => {
     const id = Date.now();
     setNotifications((prev) => [...prev, { id, text }]);
@@ -327,6 +331,15 @@ export default function FindMyFitPage() {
   useEffect(() => {
     const socket = io(API_BASE_URL, { transports: ["websocket"], reconnectionAttempts: 5 });
     socketRef.current = socket;
+
+    // On (re)connect: if the user was already in a room, re-join it.
+    // This fixes the stale-socket bug where useEffect re-runs and the new
+    // socket never emits join_session for the current room.
+    socket.on("connect", () => {
+      if (roomIdRef.current) {
+        socket.emit("join_session", roomIdRef.current);
+      }
+    });
 
     socket.on("admin:queueUpdate",     ({ queueLength: q }) => setQueueLength(q));
     socket.on("admin:updateAnalytics", ({ queueLength: q }) => { if (q !== undefined) setQueueLength(q); });
